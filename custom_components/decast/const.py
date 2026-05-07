@@ -15,6 +15,12 @@ SIGNAL_NEW_READING = "decast_new_reading_{entry_id}"
 # new state. Payload: {"serial": str, "resource": str, "offset": float}.
 SIGNAL_OFFSET_CHANGED = "decast_offset_changed_{entry_id}"
 
+# Fired when the Price Number entity changes. The mirror price-Sensor (which
+# the HA Energy dashboard picker can see — it filters its entity picker to
+# sensor/input_number domains and ignores `number`) listens and updates.
+# Payload: {"serial": str, "resource": str, "price": float}.
+SIGNAL_PRICE_CHANGED = "decast_price_changed_{entry_id}"
+
 # Fired on the HA event bus for every received webhook (accepted, rejected,
 # or ignored) so users can watch live in Developer Tools → Events and
 # trigger automations from incoming readings.

@@ -21,7 +21,12 @@
       "hot_water": { "name": "Горячая вода" },
       "electricity": { "name": "Электричество" },
       "gas": { "name": "Газ" },
-      "heating": { "name": "Отопление" }
+      "heating": { "name": "Отопление" },
+      "cold_water_price": { "name": "Холодная вода: тариф" },
+      "hot_water_price": { "name": "Горячая вода: тариф" },
+      "electricity_price": { "name": "Электричество: тариф" },
+      "gas_price": { "name": "Газ: тариф" },
+      "heating_price": { "name": "Отопление: тариф" }
     },
     "number": {
       "cold_water_offset": { "name": "Холодная вода: предыдущие показания" },

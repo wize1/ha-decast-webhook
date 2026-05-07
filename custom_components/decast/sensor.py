@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from homeassistant.components.sensor import (
+    SensorDeviceClass,
     SensorEntity,
     SensorStateClass,
 )
@@ -17,6 +18,8 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
+from homeassistant.const import EntityCategory
+
 from . import get_meter_state
 from .const import (
     DOMAIN,
@@ -26,23 +29,39 @@ from .const import (
     RESOURCE_ELECTRICITY,
     SIGNAL_NEW_READING,
     SIGNAL_OFFSET_CHANGED,
+    SIGNAL_PRICE_CHANGED,
+    price_unit,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-# Unique-id format: "{serial}::{resource}". Serial numbers are globally
-# unique to the physical meter, so this stays stable across integration
-# remove/re-add and preserves long-term statistics.
+# Unique-id format:
+#   - reading sensor: "{serial}::{resource}"  (legacy 2-part)
+#   - price mirror:   "{serial}::{resource}::price"
+# Serial numbers are globally unique to the physical meter, so these stay
+# stable across integration remove/re-add and preserve long-term statistics.
 _UID_SEP = "::"
+_KIND_PRICE = "price"
 
 
 def _make_unique_id(serial: str, resource: str) -> str:
     return f"{serial}{_UID_SEP}{resource}"
 
 
+def _make_price_unique_id(serial: str, resource: str) -> str:
+    return f"{serial}{_UID_SEP}{resource}{_UID_SEP}{_KIND_PRICE}"
+
+
 def _parse_unique_id(uid: str) -> tuple[str, str] | None:
     parts = uid.split(_UID_SEP)
     if len(parts) != 2:
+        return None
+    return parts[0], parts[1]
+
+
+def _parse_price_unique_id(uid: str) -> tuple[str, str] | None:
+    parts = uid.split(_UID_SEP)
+    if len(parts) != 3 or parts[2] != _KIND_PRICE:
         return None
     return parts[0], parts[1]
 
@@ -54,23 +73,42 @@ async def async_setup_entry(
 ) -> None:
     """Restore previously-known meters and subscribe to new readings."""
     sensors: dict[str, DecastReadingSensor] = {}
+    price_sensors: dict[tuple[str, str], DecastPriceSensor] = {}
+    currency = hass.config.currency or "EUR"
 
     # Recreate sensors for meters HA has seen before so they appear immediately
     # on restart instead of waiting for the next webhook.
     ent_reg = er.async_get(hass)
-    initial: list[DecastReadingSensor] = []
+    initial: list[SensorEntity] = []
     for ent_entry in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
         if ent_entry.domain != "sensor":
             continue
-        parsed = _parse_unique_id(ent_entry.unique_id)
-        if parsed is None:
+
+        if (parsed := _parse_price_unique_id(ent_entry.unique_id)) is not None:
+            serial, resource = parsed
+            if resource not in RESOURCE_CONFIG:
+                continue
+            ps = DecastPriceSensor(entry.entry_id, serial, resource, currency)
+            price_sensors[(serial, resource)] = ps
+            initial.append(ps)
             continue
-        serial, resource = parsed
-        if resource not in RESOURCE_CONFIG:
-            continue
-        sensor = DecastReadingSensor(entry.entry_id, serial, resource)
-        sensors[ent_entry.unique_id] = sensor
-        initial.append(sensor)
+
+        if (parsed := _parse_unique_id(ent_entry.unique_id)) is not None:
+            serial, resource = parsed
+            if resource not in RESOURCE_CONFIG:
+                continue
+            sensor = DecastReadingSensor(entry.entry_id, serial, resource)
+            sensors[ent_entry.unique_id] = sensor
+            initial.append(sensor)
+
+    # Backfill: for any (serial, resource) we have a reading sensor for,
+    # ensure a price-mirror sensor exists too (covers upgrade-in-place).
+    for sensor in list(sensors.values()):
+        key = (sensor._serial, sensor._resource)
+        if key not in price_sensors:
+            ps = DecastPriceSensor(entry.entry_id, key[0], key[1], currency)
+            price_sensors[key] = ps
+            initial.append(ps)
 
     if initial:
         async_add_entities(initial)
@@ -89,15 +127,28 @@ async def async_setup_entry(
             existing.update_from_data(data)
             return
 
+        new: list[SensorEntity] = []
         sensor = DecastReadingSensor(entry.entry_id, serial, resource, data)
         sensors[uid] = sensor
-        async_add_entities([sensor])
+        new.append(sensor)
+
+        if (serial, resource) not in price_sensors:
+            ps = DecastPriceSensor(entry.entry_id, serial, resource, currency)
+            price_sensors[(serial, resource)] = ps
+            new.append(ps)
+
+        async_add_entities(new)
 
     @callback
     def _handle_offset_changed(data: dict[str, Any]) -> None:
         uid = _make_unique_id(data["serial"], data["resource"])
         if (sensor := sensors.get(uid)) is not None:
             sensor.refresh_from_state()
+
+    @callback
+    def _handle_price_changed(data: dict[str, Any]) -> None:
+        if (ps := price_sensors.get((data["serial"], data["resource"]))) is not None:
+            ps.refresh_from_state()
 
     entry.async_on_unload(
         async_dispatcher_connect(
@@ -111,6 +162,13 @@ async def async_setup_entry(
             hass,
             SIGNAL_OFFSET_CHANGED.format(entry_id=entry.entry_id),
             _handle_offset_changed,
+        )
+    )
+    entry.async_on_unload(
+        async_dispatcher_connect(
+            hass,
+            SIGNAL_PRICE_CHANGED.format(entry_id=entry.entry_id),
+            _handle_price_changed,
         )
     )
 
@@ -253,3 +311,75 @@ class DecastReadingSensor(SensorEntity, RestoreEntity):
                     attrs[field] = val
 
         return attrs
+
+
+class DecastPriceSensor(SensorEntity, RestoreEntity):
+    """Read-only mirror of the price Number entity.
+
+    Exists purely so the HA Energy dashboard's price-entity picker can see
+    it — that picker filters to `sensor` and `input_number` domains and
+    ignores `number`. Shares its value with the writable Number entity via
+    the meter shared-state dict + SIGNAL_PRICE_CHANGED.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_icon = "mdi:cash"
+
+    def __init__(
+        self,
+        entry_id: str,
+        serial: str,
+        resource: str,
+        currency: str,
+    ) -> None:
+        cfg = RESOURCE_CONFIG[resource]
+        self._entry_id = entry_id
+        self._serial = serial
+        self._resource = resource
+        self._attr_unique_id = _make_price_unique_id(serial, resource)
+        self._attr_translation_key = f"{cfg['key']}_price"
+        self._attr_native_unit_of_measurement = price_unit(currency, cfg["unit"])
+        self._attr_native_value = 0.0
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, serial)},
+            translation_key="meter",
+            translation_placeholders={"serial": serial},
+            manufacturer=MANUFACTURER,
+            model="IoT meter",
+            serial_number=serial,
+        )
+
+    def _meter(self) -> dict[str, Any] | None:
+        if self.hass is None:
+            return None
+        return get_meter_state(
+            self.hass, self._entry_id, self._serial, self._resource
+        )
+
+    @callback
+    def refresh_from_state(self) -> None:
+        meter = self._meter() or {}
+        self._attr_native_value = float(meter.get("price", 0.0) or 0.0)
+        if self.hass is not None and self.entity_id is not None:
+            self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+
+        # Prefer the freshly-restored value from shared state (the Number
+        # entity's async_added_to_hass writes there), fall back to our own
+        # last recorded state.
+        meter = self._meter() or {}
+        if (price := meter.get("price")) is not None:
+            self._attr_native_value = float(price or 0.0)
+            return
+
+        last = await self.async_get_last_state()
+        if last is not None and last.state not in (None, "", "unknown", "unavailable"):
+            try:
+                self._attr_native_value = float(last.state)
+            except (TypeError, ValueError):
+                pass

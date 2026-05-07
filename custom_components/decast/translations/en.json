@@ -21,7 +21,12 @@
       "hot_water": { "name": "Hot water" },
       "electricity": { "name": "Electricity" },
       "gas": { "name": "Gas" },
-      "heating": { "name": "Heating" }
+      "heating": { "name": "Heating" },
+      "cold_water_price": { "name": "Cold water price" },
+      "hot_water_price": { "name": "Hot water price" },
+      "electricity_price": { "name": "Electricity price" },
+      "gas_price": { "name": "Gas price" },
+      "heating_price": { "name": "Heating price" }
     },
     "number": {
       "cold_water_offset": { "name": "Cold water historical offset" },

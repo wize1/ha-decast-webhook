@@ -33,6 +33,7 @@ from .const import (
     RESOURCE_CONFIG,
     SIGNAL_NEW_READING,
     SIGNAL_OFFSET_CHANGED,
+    SIGNAL_PRICE_CHANGED,
     price_unit,
 )
 
@@ -260,3 +261,22 @@ class DecastPriceNumber(_DecastNumberBase):
         )
         meter["price"] = value
         self.async_write_ha_state()
+        async_dispatcher_send(
+            self.hass,
+            SIGNAL_PRICE_CHANGED.format(entry_id=self._entry_id),
+            {"serial": self._serial, "resource": self._resource, "price": value},
+        )
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        # Re-publish the restored value so the mirror sensor picks it up
+        # even when this entity is restored before the sensor.
+        async_dispatcher_send(
+            self.hass,
+            SIGNAL_PRICE_CHANGED.format(entry_id=self._entry_id),
+            {
+                "serial": self._serial,
+                "resource": self._resource,
+                "price": float(self._attr_native_value or 0.0),
+            },
+        )
