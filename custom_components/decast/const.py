@@ -40,35 +40,35 @@ RESOURCE_GAS = "GAS"
 # kWh (the spec confirms this for the tariff fields), heating in Gcal.
 RESOURCE_CONFIG: dict[str, dict] = {
     RESOURCE_COLD_WATER: {
-        "name": "Cold water",
+        "key": "cold_water",
         "device_class": SensorDeviceClass.WATER,
         "unit": UnitOfVolume.CUBIC_METERS,
         "icon": "mdi:water",
         "price_unit": "₽/m³",
     },
     RESOURCE_HOT_WATER: {
-        "name": "Hot water",
+        "key": "hot_water",
         "device_class": SensorDeviceClass.WATER,
         "unit": UnitOfVolume.CUBIC_METERS,
         "icon": "mdi:water-thermometer",
         "price_unit": "₽/m³",
     },
     RESOURCE_ELECTRICITY: {
-        "name": "Electricity",
+        "key": "electricity",
         "device_class": SensorDeviceClass.ENERGY,
         "unit": UnitOfEnergy.KILO_WATT_HOUR,
         "icon": "mdi:flash",
         "price_unit": "₽/kWh",
     },
     RESOURCE_GAS: {
-        "name": "Gas",
+        "key": "gas",
         "device_class": SensorDeviceClass.GAS,
         "unit": UnitOfVolume.CUBIC_METERS,
         "icon": "mdi:fire",
         "price_unit": "₽/m³",
     },
     RESOURCE_HEATING: {
-        "name": "Heating",
+        "key": "heating",
         "device_class": None,
         "unit": "Gcal",
         "icon": "mdi:radiator",

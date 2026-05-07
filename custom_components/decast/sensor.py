@@ -138,7 +138,7 @@ class DecastReadingSensor(SensorEntity, RestoreEntity):
         self._raw_reading: dict[str, Any] | None = None
 
         self._attr_unique_id = _make_unique_id(serial, resource)
-        self._attr_name = cfg["name"]
+        self._attr_translation_key = cfg["key"]
         self._attr_native_unit_of_measurement = cfg["unit"]
         self._attr_device_class = cfg["device_class"]
         self._attr_icon = cfg["icon"]
@@ -146,7 +146,8 @@ class DecastReadingSensor(SensorEntity, RestoreEntity):
 
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, serial)},
-            name=f"Decast meter {serial}",
+            translation_key="meter",
+            translation_placeholders={"serial": serial},
             manufacturer=MANUFACTURER,
             model="IoT meter",
             serial_number=serial,

@@ -170,10 +170,12 @@ class _DecastNumberBase(NumberEntity, RestoreEntity):
         self._resource = resource
         self._cfg = cfg
         self._attr_unique_id = _make_unique_id(serial, resource, self._kind)
+        self._attr_translation_key = f"{cfg['key']}_{self._kind}"
         self._attr_native_value = 0.0
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, serial)},
-            name=f"Decast meter {serial}",
+            translation_key="meter",
+            translation_placeholders={"serial": serial},
             manufacturer=MANUFACTURER,
             model="IoT meter",
             serial_number=serial,
@@ -212,7 +214,6 @@ class DecastOffsetNumber(_DecastNumberBase):
         cfg: dict[str, Any],
     ) -> None:
         super().__init__(entry_id, serial, resource, cfg)
-        self._attr_name = f"{cfg['name']} historical offset"
         self._attr_native_unit_of_measurement = cfg["unit"]
 
     async def async_set_native_value(self, value: float) -> None:
@@ -244,7 +245,6 @@ class DecastPriceNumber(_DecastNumberBase):
         cfg: dict[str, Any],
     ) -> None:
         super().__init__(entry_id, serial, resource, cfg)
-        self._attr_name = f"{cfg['name']} price"
         self._attr_native_unit_of_measurement = cfg.get("price_unit")
         self._attr_native_step = 0.01
 

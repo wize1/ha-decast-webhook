@@ -9,5 +9,31 @@
     "abort": {
       "single_instance_allowed": "Only one Decast webhook can be configured. Existing instances handle multiple meters automatically."
     }
+  },
+  "device": {
+    "meter": {
+      "name": "Decast meter {serial}"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "cold_water": { "name": "Cold water" },
+      "hot_water": { "name": "Hot water" },
+      "electricity": { "name": "Electricity" },
+      "gas": { "name": "Gas" },
+      "heating": { "name": "Heating" }
+    },
+    "number": {
+      "cold_water_offset": { "name": "Cold water historical offset" },
+      "hot_water_offset": { "name": "Hot water historical offset" },
+      "electricity_offset": { "name": "Electricity historical offset" },
+      "gas_offset": { "name": "Gas historical offset" },
+      "heating_offset": { "name": "Heating historical offset" },
+      "cold_water_price": { "name": "Cold water price" },
+      "hot_water_price": { "name": "Hot water price" },
+      "electricity_price": { "name": "Electricity price" },
+      "gas_price": { "name": "Gas price" },
+      "heating_price": { "name": "Heating price" }
+    }
   }
 }
