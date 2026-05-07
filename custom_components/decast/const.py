@@ -10,6 +10,14 @@ MANUFACTURER = "Decast"
 
 SIGNAL_NEW_READING = "decast_new_reading_{entry_id}"
 
+# Fired on the HA event bus for every received webhook (accepted, rejected,
+# or ignored) so users can watch live in Developer Tools → Events and
+# trigger automations from incoming readings.
+EVENT_WEBHOOK_RECEIVED = "decast_webhook_received"
+
+# Size of the in-memory ring buffer used by the diagnostics handler.
+WEBHOOK_LOG_MAX = 50
+
 RESOURCE_COLD_WATER = "COLD_WATER"
 RESOURCE_HOT_WATER = "HOT_WATER"
 RESOURCE_HEATING = "HEATING"

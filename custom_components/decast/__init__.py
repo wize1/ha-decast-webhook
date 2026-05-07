@@ -1,7 +1,9 @@
 """Decast Meter Webhook integration."""
 from __future__ import annotations
 
-from datetime import datetime
+from collections import deque
+from datetime import datetime, timezone
+import json
 import logging
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -14,18 +16,27 @@ from homeassistant.const import CONF_WEBHOOK_ID, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
-from .const import DOMAIN, SIGNAL_NEW_READING
+from .const import (
+    DOMAIN,
+    EVENT_WEBHOOK_RECEIVED,
+    SIGNAL_NEW_READING,
+    WEBHOOK_LOG_MAX,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.SENSOR]
+
+DATA_WEBHOOK_LOG = "webhook_log"
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Register the webhook and forward to the sensor platform."""
     webhook_id: str = entry.data[CONF_WEBHOOK_ID]
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {}
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        DATA_WEBHOOK_LOG: deque(maxlen=WEBHOOK_LOG_MAX),
+    }
 
     # Forward to platforms first so the dispatcher subscriber is in place
     # before any incoming webhook fires.
@@ -62,18 +73,49 @@ def _make_webhook_handler(entry: ConfigEntry):
     async def handle_webhook(
         hass: HomeAssistant, webhook_id: str, request: web.Request
     ) -> web.Response:
+        # Read the raw body first so we can log it even if JSON parsing fails.
+        raw_body = await request.text()
+
         try:
-            payload: dict[str, Any] = await request.json()
+            payload = json.loads(raw_body)
         except ValueError:
             _LOGGER.warning("Decast webhook received non-JSON body")
+            _record(
+                hass,
+                entry,
+                status="rejected",
+                reason="invalid_json",
+                payload=None,
+                raw_body=raw_body,
+                parsed=None,
+            )
             return web.Response(status=400, text="invalid json")
 
         parsed = _parse_payload(payload)
+
         if parsed is None:
-            # Acknowledge unsupported payload types so the device doesn't retry,
-            # but log them so unexpected variants surface during onboarding.
             _LOGGER.debug("Ignoring Decast payload: %s", payload)
+            _record(
+                hass,
+                entry,
+                status="ignored",
+                reason=_ignore_reason(payload),
+                payload=payload,
+                raw_body=None,
+                parsed=None,
+            )
+            # Acknowledge so the device doesn't retry forever.
             return web.Response(status=200)
+
+        _record(
+            hass,
+            entry,
+            status="accepted",
+            reason=None,
+            payload=payload,
+            raw_body=None,
+            parsed=parsed,
+        )
 
         async_dispatcher_send(
             hass,
@@ -85,6 +127,74 @@ def _make_webhook_handler(entry: ConfigEntry):
     return handle_webhook
 
 
+def _ignore_reason(payload: dict[str, Any]) -> str:
+    """Best-effort label for why a parsed-but-unaccepted payload was dropped."""
+    if not isinstance(payload, dict):
+        return "not_object"
+    payload_type = payload.get("type")
+    if payload_type != "LAST_READING":
+        return f"unsupported_type:{payload_type!r}"
+    utility = payload.get("utility") or {}
+    if not (utility.get("meteringDevice") or {}).get("serialNumber"):
+        return "missing_serial_number"
+    if not utility.get("resource"):
+        return "missing_resource"
+    reading = payload.get("reading") or {}
+    if not isinstance(reading, dict) or reading.get("value") in (None, ""):
+        return "missing_value"
+    return "unparseable_value"
+
+
+def _record(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    *,
+    status: str,
+    reason: str | None,
+    payload: dict[str, Any] | None,
+    raw_body: str | None,
+    parsed: dict[str, Any] | None,
+) -> None:
+    """Append a webhook event to the ring buffer and fire it on the event bus.
+
+    `parsed` carries `datetime` values which we serialise to ISO so the entry
+    is JSON-friendly (event listeners + diagnostics consumers).
+    """
+    received_at = datetime.now(timezone.utc)
+    parsed_serialisable = _serialise_parsed(parsed) if parsed is not None else None
+
+    log_entry: dict[str, Any] = {
+        "received_at": received_at.isoformat(),
+        "status": status,
+    }
+    if reason is not None:
+        log_entry["reason"] = reason
+    if payload is not None:
+        log_entry["payload"] = payload
+    elif raw_body is not None:
+        log_entry["raw_body"] = raw_body[:2000]
+    if parsed_serialisable is not None:
+        log_entry["parsed"] = parsed_serialisable
+
+    buf = (
+        hass.data.get(DOMAIN, {})
+        .get(entry.entry_id, {})
+        .get(DATA_WEBHOOK_LOG)
+    )
+    if buf is not None:
+        buf.append(log_entry)
+
+    hass.bus.async_fire(EVENT_WEBHOOK_RECEIVED, {"entry_id": entry.entry_id, **log_entry})
+
+
+def _serialise_parsed(parsed: dict[str, Any]) -> dict[str, Any]:
+    """Make the parsed dict JSON-friendly (datetime → ISO string)."""
+    out = dict(parsed)
+    if isinstance(rt := out.get("reading_time"), datetime):
+        out["reading_time"] = rt.isoformat()
+    return out
+
+
 def _parse_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
     """Normalize a Decast LAST_READING payload into a flat dict.
 
@@ -92,7 +202,7 @@ def _parse_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
     unsupported `type`. We are deliberately strict on `value` (must parse as
     float) since downstream sensors store it as a numeric state.
     """
-    if payload.get("type") != "LAST_READING":
+    if not isinstance(payload, dict) or payload.get("type") != "LAST_READING":
         return None
 
     utility = payload.get("utility") or {}

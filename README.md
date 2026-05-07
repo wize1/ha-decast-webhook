@@ -86,6 +86,40 @@ Payloads with `type` other than `LAST_READING`, or missing required fields
 (`utility.meteringDevice.serialNumber`, `utility.resource`, `reading.value`),
 are acknowledged with `200` but otherwise ignored.
 
+## Viewing the webhook log
+
+Three ways to inspect what Decast actually sent you:
+
+- **Live tail.** Open *Developer Tools → Events*, subscribe to event type
+  `decast_webhook_received`, and click **Start Listening**. Every incoming
+  webhook fires here — including ones that were rejected (`status: rejected`)
+  or ignored (`status: ignored`) — so you can debug a misconfigured device
+  without restarting HA.
+
+- **Recent history.** *Settings → Devices & Services → Decast Meter Webhook
+  → ⋮ menu on the integration card → Download diagnostics.* Returns a JSON
+  file with the last 50 webhook events plus device/entity registry info.
+  `contractAccount` and address fields are redacted.
+
+- **Automations.** Trigger off the same event:
+
+  ```yaml
+  trigger:
+    - platform: event
+      event_type: decast_webhook_received
+      event_data:
+        status: accepted
+  action:
+    - service: notify.persistent_notification
+      data:
+        message: >-
+          {{ trigger.event.data.parsed.resource }}:
+          {{ trigger.event.data.parsed.value }}
+  ```
+
+The ring buffer is in-memory only (cleared on HA restart) and capped at 50
+entries — it's a flight recorder, not a permanent log.
+
 ## Testing locally
 
 Once the integration is configured, you can simulate a reading with `curl`:
