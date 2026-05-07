@@ -39,6 +39,20 @@
       "electricity_price": { "name": "Electricity price" },
       "gas_price": { "name": "Gas price" },
       "heating_price": { "name": "Heating price" }
+    },
+    "date": {
+      "cold_water_price_expiry": { "name": "Cold water price expiry" },
+      "hot_water_price_expiry": { "name": "Hot water price expiry" },
+      "electricity_price_expiry": { "name": "Electricity price expiry" },
+      "gas_price_expiry": { "name": "Gas price expiry" },
+      "heating_price_expiry": { "name": "Heating price expiry" }
+    },
+    "binary_sensor": {
+      "cold_water_price_expired": { "name": "Cold water price expired" },
+      "hot_water_price_expired": { "name": "Hot water price expired" },
+      "electricity_price_expired": { "name": "Electricity price expired" },
+      "gas_price_expired": { "name": "Gas price expired" },
+      "heating_price_expired": { "name": "Heating price expired" }
     }
   }
 }

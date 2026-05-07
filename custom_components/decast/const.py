@@ -21,6 +21,17 @@ SIGNAL_OFFSET_CHANGED = "decast_offset_changed_{entry_id}"
 # Payload: {"serial": str, "resource": str, "price": float}.
 SIGNAL_PRICE_CHANGED = "decast_price_changed_{entry_id}"
 
+# Fired when the price-expiry Date entity changes. The "expired"
+# binary_sensor listens to refresh and the daily-reminder loop relies on
+# the shared state being current.
+# Payload: {"serial": str, "resource": str}.
+SIGNAL_EXPIRY_CHANGED = "decast_expiry_changed_{entry_id}"
+
+# Local-time hour/minute when the daily expiry-reminder runs. Hard-coded
+# at 09:00 local for now — could become a config-flow option later.
+REMINDER_HOUR = 9
+REMINDER_MINUTE = 0
+
 # Fired on the HA event bus for every received webhook (accepted, rejected,
 # or ignored) so users can watch live in Developer Tools → Events and
 # trigger automations from incoming readings.

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import deque
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import json
 import logging
 from typing import Any
@@ -10,23 +10,34 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aiohttp import web
 
-from homeassistant.components import webhook
+from homeassistant.components import persistent_notification, webhook
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_WEBHOOK_ID, Platform
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dispatcher_send
+from homeassistant.helpers.event import async_call_later, async_track_time_change
 
 from .const import (
     DATA_METERS,
     DOMAIN,
     EVENT_WEBHOOK_RECEIVED,
+    REMINDER_HOUR,
+    REMINDER_MINUTE,
+    RESOURCE_CONFIG,
+    SIGNAL_EXPIRY_CHANGED,
     SIGNAL_NEW_READING,
+    SIGNAL_PRICE_CHANGED,
     WEBHOOK_LOG_MAX,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.NUMBER]
+PLATFORMS: list[Platform] = [
+    Platform.SENSOR,
+    Platform.NUMBER,
+    Platform.DATE,
+    Platform.BINARY_SENSOR,
+]
 
 DATA_WEBHOOK_LOG = "webhook_log"
 
@@ -70,7 +81,96 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _make_webhook_handler(entry),
     )
 
+    _setup_price_expiry_reminders(hass, entry)
+
     return True
+
+
+def _notification_id(entry_id: str, serial: str, resource: str) -> str:
+    """Stable ID per (entry, meter, resource) so daily creates replace prior."""
+    return f"decast_price_expired_{entry_id}_{serial}_{resource}"
+
+
+def _is_meter_expired(meter: dict[str, Any]) -> bool:
+    """Mirror of binary_sensor._is_expired without the import dependency."""
+    expiry = meter.get("price_expiry")
+    if expiry is None:
+        return False
+    if date.today() < expiry:
+        return False
+    last_changed = meter.get("price_last_changed_at")
+    if last_changed is not None and last_changed >= expiry:
+        return False
+    return True
+
+
+def _setup_price_expiry_reminders(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Daily reminder at REMINDER_HOUR + auto-dismiss on expiry/price change."""
+
+    @callback
+    def _push_or_dismiss(serial: str, resource: str) -> None:
+        meters = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get(DATA_METERS, {})
+        meter = meters.get((serial, resource))
+        if meter is None:
+            return
+        nid = _notification_id(entry.entry_id, serial, resource)
+        cfg = RESOURCE_CONFIG.get(resource, {})
+        label = cfg.get("key", resource).replace("_", " ").capitalize()
+
+        if _is_meter_expired(meter):
+            expiry = meter.get("price_expiry")
+            persistent_notification.async_create(
+                hass,
+                title=f"{label} tariff needs updating",
+                message=(
+                    f"The {label.lower()} tariff for Decast meter {serial} expired "
+                    f"on {expiry.isoformat()}. Update `number.decast_meter_{serial}_"
+                    f"{cfg.get('key', '')}_price` and advance the expiry date "
+                    f"to silence this reminder."
+                ),
+                notification_id=nid,
+            )
+        else:
+            persistent_notification.async_dismiss(hass, nid)
+
+    @callback
+    def _daily(_now: datetime) -> None:
+        meters = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get(DATA_METERS, {})
+        for (serial, resource) in list(meters):
+            _push_or_dismiss(serial, resource)
+
+    @callback
+    def _on_change(data: dict[str, Any]) -> None:
+        _push_or_dismiss(data["serial"], data["resource"])
+
+    # Daily run + immediate run-once after restart so a HA bounce doesn't
+    # silence reminders for the rest of the day.
+    entry.async_on_unload(
+        async_track_time_change(
+            hass, _daily, hour=REMINDER_HOUR, minute=REMINDER_MINUTE, second=0
+        )
+    )
+    entry.async_on_unload(
+        async_dispatcher_connect(
+            hass,
+            SIGNAL_EXPIRY_CHANGED.format(entry_id=entry.entry_id),
+            _on_change,
+        )
+    )
+    entry.async_on_unload(
+        async_dispatcher_connect(
+            hass,
+            SIGNAL_PRICE_CHANGED.format(entry_id=entry.entry_id),
+            _on_change,
+        )
+    )
+
+    # Run-once a few seconds after setup so a HA restart doesn't silence the
+    # day's reminders. The 5s delay lets the date entity's async_added_to_hass
+    # populate `meter["price_expiry"]` from RestoreEntity.
+    entry.async_on_unload(
+        async_call_later(hass, 5, lambda _now: _daily(_now))
+    )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

@@ -13,6 +13,7 @@ Both values are restored across HA restarts via RestoreEntity.
 """
 from __future__ import annotations
 
+from datetime import date, timezone
 import logging
 from typing import Any
 
@@ -260,6 +261,10 @@ class DecastPriceNumber(_DecastNumberBase):
             self.hass, self._entry_id, self._serial, self._resource
         )
         meter["price"] = value
+        # Stamp the local-date the user last edited the price; the
+        # price-expired binary_sensor uses this to decide whether the
+        # tariff was already acknowledged after the expiry day.
+        meter["price_last_changed_at"] = date.today()
         self.async_write_ha_state()
         async_dispatcher_send(
             self.hass,
@@ -269,6 +274,18 @@ class DecastPriceNumber(_DecastNumberBase):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+
+        # Restore the last-changed date from HA's own state machine so the
+        # in-memory shared state survives restarts.
+        meter = get_meter_state(
+            self.hass, self._entry_id, self._serial, self._resource
+        )
+        last = await self.async_get_last_state()
+        if last is not None and last.last_changed is not None:
+            meter["price_last_changed_at"] = (
+                last.last_changed.astimezone(timezone.utc).date()
+            )
+
         # Re-publish the restored value so the mirror sensor picks it up
         # even when this entity is restored before the sensor.
         async_dispatcher_send(

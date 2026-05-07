@@ -39,6 +39,20 @@
       "electricity_price": { "name": "Электричество: тариф" },
       "gas_price": { "name": "Газ: тариф" },
       "heating_price": { "name": "Отопление: тариф" }
+    },
+    "date": {
+      "cold_water_price_expiry": { "name": "Холодная вода: дата окончания тарифа" },
+      "hot_water_price_expiry": { "name": "Горячая вода: дата окончания тарифа" },
+      "electricity_price_expiry": { "name": "Электричество: дата окончания тарифа" },
+      "gas_price_expiry": { "name": "Газ: дата окончания тарифа" },
+      "heating_price_expiry": { "name": "Отопление: дата окончания тарифа" }
+    },
+    "binary_sensor": {
+      "cold_water_price_expired": { "name": "Холодная вода: тариф истёк" },
+      "hot_water_price_expired": { "name": "Горячая вода: тариф истёк" },
+      "electricity_price_expired": { "name": "Электричество: тариф истёк" },
+      "gas_price_expired": { "name": "Газ: тариф истёк" },
+      "heating_price_expired": { "name": "Отопление: тариф истёк" }
     }
   }
 }
