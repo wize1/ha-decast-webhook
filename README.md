@@ -58,6 +58,27 @@ appears automatically. Subsequent readings update the existing sensor.
 > proxy, the URL won't be deliverable. Nabu Casa Cloud is the easiest option;
 > it provides webhook URLs without any port forwarding.
 
+## Branding
+
+The Decast logo PNGs used by Home Assistant's UI live in
+[`brand/`](brand/). Home Assistant doesn't read these from your integration
+repo — it fetches them from `brands.home-assistant.io/{domain}/icon.png`.
+Those URLs are populated by the
+[`home-assistant/brands`](https://github.com/home-assistant/brands) repo.
+
+To make HA and HACS show the Decast logo:
+
+1. Fork [`home-assistant/brands`](https://github.com/home-assistant/brands).
+2. Create the directory `custom_integrations/decast/` in your fork.
+3. Copy these four files from [`brand/`](brand/) into that directory:
+   `icon.png`, `icon@2x.png`, `logo.png`, `logo@2x.png`.
+4. Open a PR to the upstream repo titled
+   `Add Decast Meter Webhook (custom)`.
+
+After it merges, the Decast logo will appear automatically in *Settings →
+Devices & Services* and in the HACS card. No change to this integration is
+needed.
+
 ## Webhook contract
 
 The integration consumes the `LAST_READING` variant of the [Decast webhook
