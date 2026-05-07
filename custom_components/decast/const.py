@@ -44,37 +44,43 @@ RESOURCE_CONFIG: dict[str, dict] = {
         "device_class": SensorDeviceClass.WATER,
         "unit": UnitOfVolume.CUBIC_METERS,
         "icon": "mdi:water",
-        "price_unit": "₽/m³",
     },
     RESOURCE_HOT_WATER: {
         "key": "hot_water",
         "device_class": SensorDeviceClass.WATER,
         "unit": UnitOfVolume.CUBIC_METERS,
         "icon": "mdi:water-thermometer",
-        "price_unit": "₽/m³",
     },
     RESOURCE_ELECTRICITY: {
         "key": "electricity",
         "device_class": SensorDeviceClass.ENERGY,
         "unit": UnitOfEnergy.KILO_WATT_HOUR,
         "icon": "mdi:flash",
-        "price_unit": "₽/kWh",
     },
     RESOURCE_GAS: {
         "key": "gas",
         "device_class": SensorDeviceClass.GAS,
         "unit": UnitOfVolume.CUBIC_METERS,
         "icon": "mdi:fire",
-        "price_unit": "₽/m³",
     },
     RESOURCE_HEATING: {
         "key": "heating",
         "device_class": None,
         "unit": "Gcal",
         "icon": "mdi:radiator",
-        "price_unit": "₽/Gcal",
     },
 }
+
+
+def price_unit(currency: str, consumption_unit: str) -> str:
+    """Build the unit-of-measurement for a price entity.
+
+    HA's Energy dashboard validates that the price entity's unit is
+    `<currency-iso-code>/<consumption-unit>` (e.g. ``RUB/m³``). We compose
+    it from `hass.config.currency` so it stays consistent with whatever
+    locale HA is configured for.
+    """
+    return f"{currency or 'EUR'}/{consumption_unit}"
 
 # Tariff fields on ElectricityReading. We surface them as attributes; users who
 # want a per-tariff sensor can build a Template Helper from the attribute.

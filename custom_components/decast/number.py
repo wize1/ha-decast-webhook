@@ -33,6 +33,7 @@ from .const import (
     RESOURCE_CONFIG,
     SIGNAL_NEW_READING,
     SIGNAL_OFFSET_CHANGED,
+    price_unit,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ async def async_setup_entry(
 ) -> None:
     """Restore previously-seen meter Numbers and listen for new ones."""
     numbers: dict[str, _DecastNumberBase] = {}
+    currency = hass.config.currency or "EUR"
 
     ent_reg = er.async_get(hass)
     initial: list[_DecastNumberBase] = []
@@ -76,7 +78,7 @@ async def async_setup_entry(
         serial, resource, kind = parsed
         if resource not in RESOURCE_CONFIG:
             continue
-        n = _create(entry.entry_id, serial, resource, kind)
+        n = _create(entry.entry_id, serial, resource, kind, currency)
         numbers[ent_entry.unique_id] = n
         initial.append(n)
         seen.add((serial, resource, kind))
@@ -101,7 +103,7 @@ async def async_setup_entry(
             key = (serial, resource, kind)
             if key in seen:
                 continue
-            n = _create(entry.entry_id, serial, resource, kind)
+            n = _create(entry.entry_id, serial, resource, kind, currency)
             uid = _make_unique_id(serial, resource, kind)
             numbers[uid] = n
             initial.append(n)
@@ -122,7 +124,7 @@ async def async_setup_entry(
             uid = _make_unique_id(serial, resource, kind)
             if uid in numbers:
                 continue
-            n = _create(entry.entry_id, serial, resource, kind)
+            n = _create(entry.entry_id, serial, resource, kind, currency)
             numbers[uid] = n
             new.append(n)
         if new:
@@ -138,12 +140,12 @@ async def async_setup_entry(
 
 
 def _create(
-    entry_id: str, serial: str, resource: str, kind: str
+    entry_id: str, serial: str, resource: str, kind: str, currency: str
 ) -> "_DecastNumberBase":
     cfg = RESOURCE_CONFIG[resource]
     if kind == _KIND_OFFSET:
         return DecastOffsetNumber(entry_id, serial, resource, cfg)
-    return DecastPriceNumber(entry_id, serial, resource, cfg)
+    return DecastPriceNumber(entry_id, serial, resource, cfg, currency)
 
 
 class _DecastNumberBase(NumberEntity, RestoreEntity):
@@ -243,9 +245,12 @@ class DecastPriceNumber(_DecastNumberBase):
         serial: str,
         resource: str,
         cfg: dict[str, Any],
+        currency: str,
     ) -> None:
         super().__init__(entry_id, serial, resource, cfg)
-        self._attr_native_unit_of_measurement = cfg.get("price_unit")
+        # Unit must be `<ISO-currency-code>/<consumption-unit>` for the HA
+        # Energy dashboard to accept this entity as a price source.
+        self._attr_native_unit_of_measurement = price_unit(currency, cfg["unit"])
         self._attr_native_step = 0.01
 
     async def async_set_native_value(self, value: float) -> None:
