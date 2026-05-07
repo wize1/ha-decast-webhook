@@ -17,6 +17,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .const import (
+    DATA_METERS,
     DOMAIN,
     EVENT_WEBHOOK_RECEIVED,
     SIGNAL_NEW_READING,
@@ -25,9 +26,27 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.NUMBER]
 
 DATA_WEBHOOK_LOG = "webhook_log"
+
+
+def get_meter_state(
+    hass: HomeAssistant, entry_id: str, serial: str, resource: str
+) -> dict[str, Any]:
+    """Return (creating if needed) the shared per-meter state dict.
+
+    Both sensor and number platforms call this — the dict carries the latest
+    raw webhook value, the user-set historical offset, and the user-set
+    price. Reads/writes are all on the event loop thread, so no locking.
+    """
+    meters = hass.data.setdefault(DOMAIN, {}).setdefault(entry_id, {}).setdefault(
+        DATA_METERS, {}
+    )
+    return meters.setdefault(
+        (serial, resource),
+        {"raw_value": None, "offset": 0.0, "price": 0.0},
+    )
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -36,6 +55,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         DATA_WEBHOOK_LOG: deque(maxlen=WEBHOOK_LOG_MAX),
+        DATA_METERS: {},
     }
 
     # Forward to platforms first so the dispatcher subscriber is in place
@@ -116,6 +136,13 @@ def _make_webhook_handler(entry: ConfigEntry):
             raw_body=None,
             parsed=parsed,
         )
+
+        # Stash the raw value in shared state before dispatching, so the
+        # sensor and number entities all see the new reading on lookup.
+        meter = get_meter_state(
+            hass, entry.entry_id, parsed["serial"], parsed["resource"]
+        )
+        meter["raw_value"] = parsed["value"]
 
         async_dispatcher_send(
             hass,

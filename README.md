@@ -29,6 +29,25 @@ calls from HA.
   (`tariff1Value` … `tariff4Value`) are also exposed as attributes when the
   meter reports them.
 
+- Two writable **Number** entities per (meter, resource) under the same
+  device, both restored across restarts:
+
+  | Entity                         | Default | Purpose |
+  | ------------------------------ | ------- | ------- |
+  | `… historical offset`          | `0`     | Added to the raw webhook value before it's displayed. Use this to seed the meter with consumption that predates the integration (e.g. previous manual readings). |
+  | `… price`                      | `0`     | Currency per unit (default `₽/m³`, `₽/kWh`, `₽/Gcal`). Wire this into the Energy dashboard's *Use an entity tracking the price* option. |
+
+  The reading sensor's value is `raw_value + historical_offset`. The raw
+  webhook value and current offset are both exposed as sensor attributes
+  (`raw_value`, `historical_offset`).
+
+  > **Set the offset once at setup.** The reading sensor uses
+  > `state_class: total_increasing`, so changing the offset later can show
+  > as a meter reset (if you decrease it) or as a fake spike of consumption
+  > (if you increase it) in HA's long-term statistics. If you must change
+  > it later, also reset statistics for the affected sensor under
+  > *Developer Tools → Statistics*.
+
 ## Install
 
 ### Via HACS (recommended)
@@ -51,7 +70,21 @@ Assistant `config/custom_components/` directory and restart.
 4. Press **Submit**.
 
 That's it. The first time each meter posts a reading, a device + sensor pair
-appears automatically. Subsequent readings update the existing sensor.
+appears automatically (along with the offset and price Number entities).
+Subsequent readings update the existing sensor.
+
+### Wiring up the Energy dashboard
+
+After your first reading arrives:
+
+1. *Settings → Dashboards → Energy*
+2. For water: add the cold-water sensor (e.g. `sensor.decast_meter_222444_cold_water`)
+   under **Water sources**. For the cost, choose
+   **Use an entity tracking the price** and pick the matching `… price`
+   number entity (e.g. `number.decast_meter_222444_cold_water_price`).
+3. For electricity: same flow under **Electricity grid → Grid consumption**.
+4. Set the historical offset in the corresponding Number entity if your
+   meter was already accumulating before the integration was set up.
 
 > **Public reachability.** Decast's cloud needs to reach Home Assistant from
 > the internet. If you don't already expose HA via Nabu Casa or a reverse

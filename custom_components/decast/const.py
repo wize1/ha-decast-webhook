@@ -10,6 +10,11 @@ MANUFACTURER = "Decast"
 
 SIGNAL_NEW_READING = "decast_new_reading_{entry_id}"
 
+# Fired when the Historical-offset Number entity for a meter changes value,
+# so the corresponding sensor can recompute (raw + offset) and write its
+# new state. Payload: {"serial": str, "resource": str, "offset": float}.
+SIGNAL_OFFSET_CHANGED = "decast_offset_changed_{entry_id}"
+
 # Fired on the HA event bus for every received webhook (accepted, rejected,
 # or ignored) so users can watch live in Developer Tools → Events and
 # trigger automations from incoming readings.
@@ -17,6 +22,11 @@ EVENT_WEBHOOK_RECEIVED = "decast_webhook_received"
 
 # Size of the in-memory ring buffer used by the diagnostics handler.
 WEBHOOK_LOG_MAX = 50
+
+# Key in `hass.data[DOMAIN][entry_id]` for the shared meter-state dict that
+# the sensor and number platforms both read/write. Maps (serial, resource)
+# tuples to {"raw_value": float|None, "offset": float, "price": float}.
+DATA_METERS = "meters"
 
 RESOURCE_COLD_WATER = "COLD_WATER"
 RESOURCE_HOT_WATER = "HOT_WATER"
@@ -34,30 +44,35 @@ RESOURCE_CONFIG: dict[str, dict] = {
         "device_class": SensorDeviceClass.WATER,
         "unit": UnitOfVolume.CUBIC_METERS,
         "icon": "mdi:water",
+        "price_unit": "₽/m³",
     },
     RESOURCE_HOT_WATER: {
         "name": "Hot water",
         "device_class": SensorDeviceClass.WATER,
         "unit": UnitOfVolume.CUBIC_METERS,
         "icon": "mdi:water-thermometer",
+        "price_unit": "₽/m³",
     },
     RESOURCE_ELECTRICITY: {
         "name": "Electricity",
         "device_class": SensorDeviceClass.ENERGY,
         "unit": UnitOfEnergy.KILO_WATT_HOUR,
         "icon": "mdi:flash",
+        "price_unit": "₽/kWh",
     },
     RESOURCE_GAS: {
         "name": "Gas",
         "device_class": SensorDeviceClass.GAS,
         "unit": UnitOfVolume.CUBIC_METERS,
         "icon": "mdi:fire",
+        "price_unit": "₽/m³",
     },
     RESOURCE_HEATING: {
         "name": "Heating",
         "device_class": None,
         "unit": "Gcal",
         "icon": "mdi:radiator",
+        "price_unit": "₽/Gcal",
     },
 }
 

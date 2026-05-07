@@ -17,6 +17,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
+from . import get_meter_state
 from .const import (
     DOMAIN,
     ELECTRICITY_TARIFF_FIELDS,
@@ -24,6 +25,7 @@ from .const import (
     RESOURCE_CONFIG,
     RESOURCE_ELECTRICITY,
     SIGNAL_NEW_READING,
+    SIGNAL_OFFSET_CHANGED,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -66,7 +68,7 @@ async def async_setup_entry(
         serial, resource = parsed
         if resource not in RESOURCE_CONFIG:
             continue
-        sensor = DecastReadingSensor(serial, resource)
+        sensor = DecastReadingSensor(entry.entry_id, serial, resource)
         sensors[ent_entry.unique_id] = sensor
         initial.append(sensor)
 
@@ -87,15 +89,28 @@ async def async_setup_entry(
             existing.update_from_data(data)
             return
 
-        sensor = DecastReadingSensor(serial, resource, data)
+        sensor = DecastReadingSensor(entry.entry_id, serial, resource, data)
         sensors[uid] = sensor
         async_add_entities([sensor])
+
+    @callback
+    def _handle_offset_changed(data: dict[str, Any]) -> None:
+        uid = _make_unique_id(data["serial"], data["resource"])
+        if (sensor := sensors.get(uid)) is not None:
+            sensor.refresh_from_state()
 
     entry.async_on_unload(
         async_dispatcher_connect(
             hass,
             SIGNAL_NEW_READING.format(entry_id=entry.entry_id),
             _handle_reading,
+        )
+    )
+    entry.async_on_unload(
+        async_dispatcher_connect(
+            hass,
+            SIGNAL_OFFSET_CHANGED.format(entry_id=entry.entry_id),
+            _handle_offset_changed,
         )
     )
 
@@ -109,11 +124,13 @@ class DecastReadingSensor(SensorEntity, RestoreEntity):
 
     def __init__(
         self,
+        entry_id: str,
         serial: str,
         resource: str,
         initial_data: dict[str, Any] | None = None,
     ) -> None:
         cfg = RESOURCE_CONFIG[resource]
+        self._entry_id = entry_id
         self._serial = serial
         self._resource = resource
         self._reading_time: datetime | None = None
@@ -138,19 +155,57 @@ class DecastReadingSensor(SensorEntity, RestoreEntity):
         if initial_data is not None:
             self._apply(initial_data)
 
+    def _meter(self) -> dict[str, Any] | None:
+        # `self.hass` is None until the entity is added — guard so __init__
+        # and other pre-add code paths don't blow up.
+        if self.hass is None:
+            return None
+        return get_meter_state(
+            self.hass, self._entry_id, self._serial, self._resource
+        )
+
+    def _compute_native_value(self) -> float | None:
+        meter = self._meter()
+        if meter is None:
+            return None
+        raw = meter.get("raw_value")
+        if raw is None:
+            return None
+        return float(raw) + float(meter.get("offset", 0.0))
+
     def _apply(self, data: dict[str, Any]) -> None:
-        self._attr_native_value = data["value"]
+        # Keep metadata fresh from each webhook. native_value is recomputed
+        # from shared state if we're attached to hass; otherwise leave it for
+        # async_added_to_hass to fill in.
         self._reading_time = data.get("reading_time")
         self._utility = data.get("utility")
         self._raw_reading = data.get("raw_reading")
+        if self.hass is not None:
+            self._attr_native_value = self._compute_native_value()
 
     @callback
     def update_from_data(self, data: dict[str, Any]) -> None:
         self._apply(data)
         self.async_write_ha_state()
 
+    @callback
+    def refresh_from_state(self) -> None:
+        """Recompute native_value from shared state (offset changed)."""
+        self._attr_native_value = self._compute_native_value()
+        # Only write if we're actually attached — async_added_to_hass may not
+        # have run yet during initial setup.
+        if self.hass is not None and self.entity_id is not None:
+            self.async_write_ha_state()
+
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+
+        # If the offset Number entity already wrote into shared state during
+        # its own added_to_hass, prefer the freshly-computed value.
+        if (computed := self._compute_native_value()) is not None:
+            self._attr_native_value = computed
+            return
+
         if self._attr_native_value is not None:
             return
 
@@ -171,9 +226,12 @@ class DecastReadingSensor(SensorEntity, RestoreEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        meter = self._meter() or {}
         attrs: dict[str, Any] = {
             "serial_number": self._serial,
             "resource": self._resource,
+            "raw_value": meter.get("raw_value"),
+            "historical_offset": meter.get("offset", 0.0),
         }
         if self._reading_time is not None:
             attrs["reading_time"] = self._reading_time.isoformat()
