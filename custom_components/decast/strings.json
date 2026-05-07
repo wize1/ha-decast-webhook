@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Decast webhook",
+        "description": "Decast meters will POST readings to:\n\n`{webhook_url}`\n\nPaste this URL into your Decast account's webhook settings. Press **Submit** to finish setup. Each meter that posts to this URL becomes a device with one sensor per resource (cold water, hot water, etc.)."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Only one Decast webhook can be configured. Existing instances handle multiple meters automatically."
+    }
+  }
+}
