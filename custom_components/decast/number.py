@@ -64,6 +64,9 @@ async def async_setup_entry(
 
     ent_reg = er.async_get(hass)
     initial: list[_DecastNumberBase] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    # 1. Numbers we created on prior runs.
     for ent_entry in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
         if ent_entry.domain != "number":
             continue
@@ -76,6 +79,33 @@ async def async_setup_entry(
         n = _create(entry.entry_id, serial, resource, kind)
         numbers[ent_entry.unique_id] = n
         initial.append(n)
+        seen.add((serial, resource, kind))
+
+    # 2. Backfill: any sensor entity we own implies a meter that should also
+    # have offset + price numbers. This covers two cases:
+    #   - first install of this version on a HA that already had reading
+    #     sensors (so the user gets the new entities without waiting for
+    #     the next webhook),
+    #   - a previously-disabled or partially-deleted state where the sensor
+    #     is in the registry but the matching numbers aren't.
+    for ent_entry in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+        if ent_entry.domain != "sensor":
+            continue
+        parts = ent_entry.unique_id.split(_UID_SEP)
+        if len(parts) != 2:
+            continue
+        serial, resource = parts
+        if resource not in RESOURCE_CONFIG:
+            continue
+        for kind in _KINDS:
+            key = (serial, resource, kind)
+            if key in seen:
+                continue
+            n = _create(entry.entry_id, serial, resource, kind)
+            uid = _make_unique_id(serial, resource, kind)
+            numbers[uid] = n
+            initial.append(n)
+            seen.add(key)
 
     if initial:
         async_add_entities(initial)
